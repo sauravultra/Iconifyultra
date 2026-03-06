@@ -410,19 +410,114 @@ class StatusbarMisc(context: Context) : ModPack(context) {
             }
         }
 
-        phoneStatusBarViewClass
-            .hookMethod("onFinishInflate")
-            .runAfter { param ->
-                phoneStatusBarViewParam = param.thisObject as ViewGroup
+       
+            phoneStatusBarViewClass
+    .hookMethod("onFinishInflate")
+    .runAfter { param ->
+        phoneStatusBarViewParam = param.thisObject as ViewGroup
 
-                phoneStatusBarViewParam.moveStatusBarClock()
+        phoneStatusBarViewParam.moveStatusBarClock()
+        phoneStatusBarViewParam.background = ColorDrawable(Color.parseColor("#33000000"))
+        val res = phoneStatusBarViewParam.resources
+
+        val startSideId = res.getIdentifier(
+            "status_bar_start_side_except_heads_up",
+            "id",
+            "com.android.systemui"
+        )
+        val startSideView = phoneStatusBarViewParam.findViewById<ViewGroup>(startSideId)
+
+        startSideView?.layoutParams?.let { lp ->
+            val widthInPx = TypedValue.applyDimension(
+                TypedValue.COMPLEX_UNIT_DIP,
+                1400f,
+                res.displayMetrics
+            ).toInt()
+            lp.width = widthInPx
+            startSideView.layoutParams = lp
+        }
+
+        // Find the notification_icon_area view
+        val iconAreaId = res.getIdentifier("notification_icon_area", "id", "com.android.systemui")
+        val iconArea = phoneStatusBarViewParam.findViewById<ViewGroup>(iconAreaId)
+
+        // Convert 250dp to pixels
+        val iconAreaWidthInPx = TypedValue.applyDimension(
+            TypedValue.COMPLEX_UNIT_DIP,
+            250f,
+            res.displayMetrics
+        ).toInt()
+
+        // Update layout width
+        iconArea?.layoutParams?.let { lp ->
+            lp.width = iconAreaWidthInPx
+            iconArea.layoutParams = lp
+        }
+
+        // *** CombinedQSHeader block ***
+        val root = param.thisObject as ViewGroup
+        val res2 = root.resources   // renamed to avoid conflict
+
+        // get existing views
+        val clockId = res2.getIdentifier("clock", "id", "com.android.systemui")
+        val dateId = res2.getIdentifier("date", "id", "com.android.systemui")
+        val systemIconsId = res2.getIdentifier("system_icons", "id", "com.android.systemui")
+        val batteryId = res2.getIdentifier("battery", "id", "com.android.systemui")
+
+        val clockView = root.findViewById<View>(clockId)
+        val dateView = root.findViewById<View>(dateId)
+        val systemIcons = root.findViewById<View>(systemIconsId)
+        val battery = root.findViewById<View>(batteryId)
+
+        if (clockView != null && dateView != null && systemIcons != null && battery != null) {
+            // remove them from parent before re-adding
+            (clockView.parent as? ViewGroup)?.removeView(clockView)
+            (dateView.parent as? ViewGroup)?.removeView(dateView)
+            (systemIcons.parent as? ViewGroup)?.removeView(systemIcons)
+            (battery.parent as? ViewGroup)?.removeView(battery)
+
+            // parent LinearLayout with background
+            val container = LinearLayout(root.context).apply {
+                orientation = LinearLayout.HORIZONTAL
+                layoutParams = LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.WRAP_CONTENT,
+                    LinearLayout.LayoutParams.MATCH_PARENT
+                )
+                setBackgroundColor(Color.parseColor("#ff000000"))
+                setPadding(16, 0, 16, 0)
             }
 
-        shadeHeaderControllerClass
-            .hookMethod("updateQQSPaddings")
-            .suppressError()
-            .runAfter { phoneStatusBarViewParam.moveStatusBarClock() }
+            val leftText = TextView(root.context).apply {
+                text = "   "
+                textSize = 16f
+                gravity = Gravity.CENTER
+                layoutParams = LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.WRAP_CONTENT,
+                    LinearLayout.LayoutParams.MATCH_PARENT
+                )
+            }
+
+            val leafText = TextView(root.context).apply {
+                text = "🍁   "
+                textSize = 16f
+                gravity = Gravity.CENTER
+                layoutParams = LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.WRAP_CONTENT,
+                    LinearLayout.LayoutParams.MATCH_PARENT
+                )
+            }
+
+            container.addView(clockView)
+            container.addView(dateView)
+            container.addView(leftText)
+            container.addView(systemIcons)
+            container.addView(battery)
+            container.addView(leafText)
+
+            root.addView(container)
+        }
     }
+    } 
 
     private fun show4GInsteadOfLTE() {
         val mobileMappingsConfigClass =
