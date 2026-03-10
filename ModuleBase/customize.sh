@@ -1,4 +1,5 @@
-PKGNAME="com.drdisagree.pixellauncherenhanced"
+BASEPKGNAME="com.drdisagree.iconify"
+PKGNAME="$BASEPKGNAME.debug"
 LSPDDBPATH="/data/adb/lspd/config/modules_config.db"
 MAGISKDBPATH="/data/adb/magisk.db"
 
@@ -34,7 +35,7 @@ launchApp() {
   sleep 1
   if pm list packages | grep -q "$PKGNAME"; then
     ui_print "- Launching Iconify..."
-    am start -n $PKGNAME/$PKGNAME.SplashActivity
+    am start -n $PKGNAME/$BASEPKGNAME.SplashActivity
   fi
 }
 
