@@ -12,7 +12,6 @@ import android.content.res.XResources
 import android.graphics.Color
 import android.graphics.drawable.ColorDrawable
 import android.graphics.drawable.GradientDrawable
-import android.graphics.drawable.GradientDrawable
 import android.graphics.drawable.LayerDrawable
 import android.graphics.drawable.RippleDrawable
 import android.os.Bundle
@@ -24,6 +23,7 @@ import android.view.Gravity
 import android.view.View
 import android.view.ViewGroup
 import android.view.animation.AccelerateDecelerateInterpolator
+import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.TextView
 import androidx.core.graphics.ColorUtils
@@ -109,6 +109,7 @@ class StatusbarMisc(context: Context) : ModPack(context) {
         notificationIconsLimit()
         clickableClockView()
         forceCircleQSTiles()
+        resizeBatteryIcon()
     }
 
     private fun hideLockscreenCarrierOrStatusbar() {
@@ -210,7 +211,6 @@ class StatusbarMisc(context: Context) : ModPack(context) {
                 val root = param.args[0] as? ViewGroup ?: return@runAfter
                 val res = root.resources
 
-                // Avoid adding container twice on re-inflation
                 if (root.findViewWithTag<View>("leaf_container") != null) return@runAfter
 
                 val clockId = res.getIdentifier("clock", "id", "com.android.systemui")
@@ -391,7 +391,6 @@ class StatusbarMisc(context: Context) : ModPack(context) {
             "$SYSTEMUI_PACKAGE.qs.tileimpl.QSTileViewImpl"
         )
 
-        // Hook changeCornerRadius to always force circle
         qsTileViewImpl
             .hookMethod("changeCornerRadius")
             .parameters(Float::class.java)
@@ -399,8 +398,6 @@ class StatusbarMisc(context: Context) : ModPack(context) {
                 param.args[0] = 999f
             }
 
-        // Also hook handleStateChanged as a fallback
-        // to force circle after state change redraws the tile
         qsTileViewImpl
             .hookMethod("handleStateChanged")
             .runAfter { param ->
@@ -420,6 +417,50 @@ class StatusbarMisc(context: Context) : ModPack(context) {
                     }
                 }
             }
+    }
+
+    private fun resizeBatteryIcon() {
+        val batteryMeterViewClass = findClass(
+            "$SYSTEMUI_PACKAGE.battery.BatteryMeterView"
+        )
+
+        // Hook scaleBatteryMeterViews (called for NewStatusBarIcons / unified battery)
+        batteryMeterViewClass
+            .hookMethod("scaleBatteryMeterViews")
+            .runAfter { param ->
+                val view = param.thisObject as? ViewGroup ?: return@runAfter
+                applyBatteryIconSize(view)
+            }
+
+        // Also hook scaleBatteryMeterViewsLegacy as fallback for older battery style
+        batteryMeterViewClass
+            .hookMethod("scaleBatteryMeterViewsLegacy")
+            .runAfter { param ->
+                val view = param.thisObject as? ViewGroup ?: return@runAfter
+                applyBatteryIconSize(view)
+            }
+    }
+
+    private fun applyBatteryIconSize(view: ViewGroup) {
+        val widthPx = TypedValue.applyDimension(
+            TypedValue.COMPLEX_UNIT_DIP,
+            30f,
+            view.resources.displayMetrics
+        ).toInt()
+        val heightPx = TypedValue.applyDimension(
+            TypedValue.COMPLEX_UNIT_DIP,
+            15f,
+            view.resources.displayMetrics
+        ).toInt()
+
+        for (i in 0 until view.childCount) {
+            val child = view.getChildAt(i)
+            if (child is ImageView) {
+                child.layoutParams = LinearLayout.LayoutParams(widthPx, heightPx)
+                child.requestLayout()
+                break
+            }
+        }
     }
 
     private fun show4GInsteadOfLTE() {
