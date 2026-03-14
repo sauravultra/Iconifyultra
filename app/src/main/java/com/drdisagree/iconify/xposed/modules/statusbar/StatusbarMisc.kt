@@ -12,6 +12,8 @@ import android.content.res.XResources
 import android.graphics.Color
 import android.graphics.drawable.ColorDrawable
 import android.graphics.drawable.GradientDrawable
+import android.graphics.drawable.GradientDrawable
+import android.graphics.drawable.LayerDrawable
 import android.graphics.drawable.RippleDrawable
 import android.os.Bundle
 import android.provider.AlarmClock
@@ -106,6 +108,7 @@ class StatusbarMisc(context: Context) : ModPack(context) {
         show4GInsteadOfLTE()
         notificationIconsLimit()
         clickableClockView()
+        forceCircleQSTiles()
     }
 
     private fun hideLockscreenCarrierOrStatusbar() {
@@ -291,8 +294,6 @@ class StatusbarMisc(context: Context) : ModPack(context) {
     private fun setClockPosition() {
         val phoneStatusBarViewClass =
             findClass("$SYSTEMUI_PACKAGE.statusbar.phone.PhoneStatusBarView")
-        val shadeHeaderControllerClass =
-            findClass("$SYSTEMUI_PACKAGE.shade.ShadeHeaderController")
 
         var phoneStatusBarViewParam: ViewGroup? = null
 
@@ -381,6 +382,42 @@ class StatusbarMisc(context: Context) : ModPack(context) {
                         TypedValue.COMPLEX_UNIT_DIP, 250f, res.displayMetrics
                     ).toInt()
                     iconArea.layoutParams = lp
+                }
+            }
+    }
+
+    private fun forceCircleQSTiles() {
+        val qsTileViewImpl = findClass(
+            "$SYSTEMUI_PACKAGE.qs.tileimpl.QSTileViewImpl"
+        )
+
+        // Hook changeCornerRadius to always force circle
+        qsTileViewImpl
+            .hookMethod("changeCornerRadius")
+            .parameters(Float::class.java)
+            .runBefore { param ->
+                param.args[0] = 999f
+            }
+
+        // Also hook handleStateChanged as a fallback
+        // to force circle after state change redraws the tile
+        qsTileViewImpl
+            .hookMethod("handleStateChanged")
+            .runAfter { param ->
+                val view = param.thisObject as? ViewGroup ?: return@runAfter
+                val background = view.background as? RippleDrawable ?: return@runAfter
+
+                val backgroundId = view.resources.getIdentifier(
+                    "background", "id", "com.android.systemui"
+                )
+                val layer = background.findDrawableByLayerId(backgroundId) as? LayerDrawable
+                    ?: return@runAfter
+
+                for (i in 0 until layer.numberOfLayers) {
+                    val drawable = layer.getDrawable(i)
+                    if (drawable is GradientDrawable) {
+                        drawable.cornerRadius = 999f
+                    }
                 }
             }
     }
