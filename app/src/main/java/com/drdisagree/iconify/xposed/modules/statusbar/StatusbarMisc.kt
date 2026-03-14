@@ -1,5 +1,4 @@
 package com.drdisagree.iconify.xposed.modules.statusbar
-
 import android.R
 import android.animation.ObjectAnimator
 import android.animation.PropertyValuesHolder
@@ -27,11 +26,8 @@ import android.widget.LinearLayout
 import android.widget.TextView
 import androidx.core.graphics.ColorUtils
 import com.drdisagree.iconify.data.common.Const.SYSTEMUI_PACKAGE
-import com.drdisagree.iconify.data.common.Preferences.BATTERY_STYLE_DEFAULT
 import com.drdisagree.iconify.data.common.Preferences.CHIP_STATUSBAR_CLOCK_CLICKABLE_SWITCH
-import com.drdisagree.iconify.data.common.Preferences.CUSTOM_BATTERY_STYLE
 import com.drdisagree.iconify.data.common.Preferences.DUAL_STATUSBAR
-import com.drdisagree.iconify.data.common.Preferences.HIDE_BATTERY_VIEW
 import com.drdisagree.iconify.data.common.Preferences.HIDE_LOCKSCREEN_CARRIER
 import com.drdisagree.iconify.data.common.Preferences.HIDE_LOCKSCREEN_STATUSBAR
 import com.drdisagree.iconify.data.common.Preferences.ICONIFY_SB_CENTER_CLOCK_CONTAINER_TAG
@@ -47,12 +43,10 @@ import com.drdisagree.iconify.xposed.modules.extras.utils.StatusBarClock.getCent
 import com.drdisagree.iconify.xposed.modules.extras.utils.StatusBarClock.getLeftClockView
 import com.drdisagree.iconify.xposed.modules.extras.utils.StatusBarClock.getRightClockView
 import com.drdisagree.iconify.xposed.modules.extras.utils.StatusBarClock.setClockGravity
-import com.drdisagree.iconify.xposed.modules.extras.utils.ViewHelper.hideView
 import com.drdisagree.iconify.xposed.modules.extras.utils.ViewHelper.reAddView
 import com.drdisagree.iconify.xposed.modules.extras.utils.ViewHelper.toPx
 import com.drdisagree.iconify.xposed.modules.extras.utils.toolkit.ResourceHookManager
 import com.drdisagree.iconify.xposed.modules.extras.utils.toolkit.XposedHook.Companion.findClass
-import com.drdisagree.iconify.xposed.modules.extras.utils.toolkit.getField
 import com.drdisagree.iconify.xposed.modules.extras.utils.toolkit.hookLayout
 import com.drdisagree.iconify.xposed.modules.extras.utils.toolkit.hookMethod
 import com.drdisagree.iconify.xposed.modules.extras.utils.toolkit.log
@@ -78,7 +72,6 @@ class StatusbarMisc(context: Context) : ModPack(context) {
     private var show4GInsteadOfLTE = false
     private var notifIconsLimit = -1
     private var dualStatusbarEnabled = false
-    private var hideDefaultBattery = false
 
     override fun updatePrefs(vararg key: String) {
         Xprefs.apply {
@@ -91,9 +84,6 @@ class StatusbarMisc(context: Context) : ModPack(context) {
             notifIconsLimit = getSliderInt(NOTIFICATION_ICONS_LIMIT, -1)
             dualStatusbarEnabled = getBoolean(DUAL_STATUSBAR, false)
             mClockClickable = getBoolean(CHIP_STATUSBAR_CLOCK_CLICKABLE_SWITCH, false)
-            hideDefaultBattery =
-                getString(CUSTOM_BATTERY_STYLE, "0")!!.toInt() == BATTERY_STYLE_DEFAULT
-                        && getBoolean(HIDE_BATTERY_VIEW, false)
         }
 
         when (key.firstOrNull()) {
@@ -179,49 +169,6 @@ class StatusbarMisc(context: Context) : ModPack(context) {
     }
 
     private fun applyClockSize() {
-        val textChangeListener = object : TextWatcher {
-            override fun beforeTextChanged(
-                s: CharSequence,
-                start: Int,
-                count: Int,
-                after: Int
-            ) {
-            }
-
-            override fun onTextChanged(
-                s: CharSequence,
-                start: Int,
-                before: Int,
-                count: Int
-            ) {
-            }
-
-            override fun afterTextChanged(s: Editable) {
-                setClockSize()
-            }
-        }
-
-        fun addClockTextListener() {
-            mClockView?.addTextChangedListener(textChangeListener)
-            mCenterClockView?.addTextChangedListener(textChangeListener)
-            mRightClockView?.addTextChangedListener(textChangeListener)
-        }
-
-        fun removeClockTextListener() {
-            mClockView?.removeTextChangedListener(textChangeListener)
-            mCenterClockView?.removeTextChangedListener(textChangeListener)
-            mRightClockView?.removeTextChangedListener(textChangeListener)
-        }
-
-        fun updateClockTextSize() {
-            mLeftClockSize = mClockView?.textSize?.toInt() ?: 14
-            mCenterClockSize = mCenterClockView?.textSize?.toInt() ?: 14
-            mRightClockSize = mRightClockView?.textSize?.toInt() ?: 14
-
-            setClockSize()
-            addClockTextListener()
-        }
-
         val collapsedStatusBarFragment = findClass(
             "$SYSTEMUI_PACKAGE.statusbar.phone.CollapsedStatusBarFragment",
             "$SYSTEMUI_PACKAGE.statusbar.phone.fragment.CollapsedStatusBarFragment"
@@ -238,54 +185,84 @@ class StatusbarMisc(context: Context) : ModPack(context) {
                 mCenterClockView = getCenterClockView(mContext, param) as? TextView
                 mRightClockView = getRightClockView(mContext, param) as? TextView
 
-                updateClockTextSize()
+                mLeftClockSize = mClockView?.textSize?.toInt() ?: 14
+                mCenterClockSize = mCenterClockView?.textSize?.toInt() ?: 14
+                mRightClockSize = mRightClockView?.textSize?.toInt() ?: 14
+
+                setClockSize()
+
+                val textChangeListener = object : TextWatcher {
+                    override fun beforeTextChanged(s: CharSequence, start: Int, count: Int, after: Int) {}
+                    override fun onTextChanged(s: CharSequence, start: Int, before: Int, count: Int) {}
+                    override fun afterTextChanged(s: Editable) {
+                        setClockSize()
+                    }
+                }
+
+                mClockView?.addTextChangedListener(textChangeListener)
+                mCenterClockView?.addTextChangedListener(textChangeListener)
+                mRightClockView?.addTextChangedListener(textChangeListener)
+
+                // ---- Leaf decoration in collapsed status bar ----
+                val root = param.args[0] as? ViewGroup ?: return@runAfter
+                val res = root.resources
+
+                // Avoid adding container twice on re-inflation
+                if (root.findViewWithTag<View>("leaf_container") != null) return@runAfter
+
+                val clockId = res.getIdentifier("clock", "id", "com.android.systemui")
+                val systemIconsId = res.getIdentifier("system_icons", "id", "com.android.systemui")
+                val batteryId = res.getIdentifier("battery", "id", "com.android.systemui")
+
+                val clockView = root.findViewById<View>(clockId)
+                val systemIcons = root.findViewById<View>(systemIconsId)
+                val battery = root.findViewById<View>(batteryId)
+
+                if (clockView == null || systemIcons == null || battery == null) return@runAfter
+
+                (clockView.parent as? ViewGroup)?.removeView(clockView)
+                (systemIcons.parent as? ViewGroup)?.removeView(systemIcons)
+                (battery.parent as? ViewGroup)?.removeView(battery)
+
+                val container = LinearLayout(root.context).apply {
+                    tag = "leaf_container"
+                    orientation = LinearLayout.HORIZONTAL
+                    layoutParams = LinearLayout.LayoutParams(
+                        LinearLayout.LayoutParams.WRAP_CONTENT,
+                        LinearLayout.LayoutParams.MATCH_PARENT
+                    )
+                    setPadding(16, 0, 16, 0)
+                }
+
+                val leftText = TextView(root.context).apply {
+                    text = "   "
+                    textSize = 16f
+                    gravity = Gravity.CENTER
+                    layoutParams = LinearLayout.LayoutParams(
+                        LinearLayout.LayoutParams.WRAP_CONTENT,
+                        LinearLayout.LayoutParams.MATCH_PARENT
+                    )
+                }
+
+                val leafText = TextView(root.context).apply {
+                    text = "🍁   "
+                    textSize = 16f
+                    gravity = Gravity.CENTER
+                    layoutParams = LinearLayout.LayoutParams(
+                        LinearLayout.LayoutParams.WRAP_CONTENT,
+                        LinearLayout.LayoutParams.MATCH_PARENT
+                    )
+                }
+
+                container.addView(clockView)
+                container.addView(leftText)
+                container.addView(systemIcons)
+                container.addView(battery)
+                container.addView(leafText)
+
+                root.addView(container)
+                // ---- End leaf decoration ----
             }
-
-        val phoneStatusBarViewControllerClass = findClass(
-            "com.android.systemui.statusbar.phone.PhoneStatusBarViewController",
-            suppressError = true
-        )
-
-        phoneStatusBarViewControllerClass
-            .hookMethod("onViewAttached")
-            .runAfter { param ->
-                mClockView = param.thisObject.getField("clock") as TextView
-                mCenterClockView = null
-                mRightClockView = null
-
-                (param.thisObject.getField("mView") as View).hideComposeBattery()
-
-                updateClockTextSize()
-            }
-
-        phoneStatusBarViewControllerClass
-            .hookMethod("onViewDetached")
-            .runBefore { removeClockTextListener() }
-    }
-
-    private fun View.hideComposeBattery() {
-        if (!hideDefaultBattery) return
-
-        val batteryMeterView = findViewById<View>(
-            mContext.resources.getIdentifier(
-                "battery",
-                "id",
-                mContext.packageName
-            )
-        )
-        val parentViewGroup = batteryMeterView.parent as? ViewGroup ?: return
-
-        val index = parentViewGroup.indexOfChild(batteryMeterView)
-
-        // iterate over siblings after BatteryMeterView
-        for (i in index + 1 until parentViewGroup.childCount) {
-            val child = parentViewGroup.getChildAt(i)
-            if (child.javaClass.simpleName == "ComposeView") {
-                // found the ComposeView
-                child.hideView()
-                break
-            }
-        }
     }
 
     @SuppressLint("RtlHardcoded")
@@ -297,26 +274,17 @@ class StatusbarMisc(context: Context) : ModPack(context) {
 
         mClockView?.let {
             it.setTextSize(unit, leftClockSize.toFloat())
-
-            if (sbClockSizeSwitch) {
-                setClockGravity(it, Gravity.LEFT or Gravity.CENTER)
-            }
+            if (sbClockSizeSwitch) setClockGravity(it, Gravity.LEFT or Gravity.CENTER)
         }
 
         mCenterClockView?.let {
             it.setTextSize(unit, centerClockSize.toFloat())
-
-            if (sbClockSizeSwitch) {
-                setClockGravity(it, Gravity.CENTER)
-            }
+            if (sbClockSizeSwitch) setClockGravity(it, Gravity.CENTER)
         }
 
         mRightClockView?.let {
             it.setTextSize(unit, rightClockSize.toFloat())
-
-            if (sbClockSizeSwitch) {
-                setClockGravity(it, Gravity.RIGHT or Gravity.CENTER)
-            }
+            if (sbClockSizeSwitch) setClockGravity(it, Gravity.RIGHT or Gravity.CENTER)
         }
     }
 
@@ -332,39 +300,21 @@ class StatusbarMisc(context: Context) : ModPack(context) {
             if (this == null) return
 
             val statusBarContents = findViewById<ViewGroup>(
-                mContext.resources.getIdentifier(
-                    "status_bar_contents",
-                    "id",
-                    mContext.packageName
-                )
+                mContext.resources.getIdentifier("status_bar_contents", "id", mContext.packageName)
             )
             val statusBarClock = findViewById<View>(
-                mContext.resources.getIdentifier(
-                    "clock",
-                    "id",
-                    mContext.packageName
-                )
+                mContext.resources.getIdentifier("clock", "id", mContext.packageName)
             )
             val startPadding = mContext.resources.getDimensionPixelSize(
-                mContext.resources.getIdentifier(
-                    "status_bar_left_clock_starting_padding",
-                    "dimen",
-                    mContext.packageName
-                )
+                mContext.resources.getIdentifier("status_bar_left_clock_starting_padding", "dimen", mContext.packageName)
             )
             val endPadding = mContext.resources.getDimensionPixelSize(
-                mContext.resources.getIdentifier(
-                    "status_bar_left_clock_end_padding",
-                    "dimen",
-                    mContext.packageName
-                )
+                mContext.resources.getIdentifier("status_bar_left_clock_end_padding", "dimen", mContext.packageName)
             )
 
             if (!dualStatusbarEnabled) {
                 when (clockPosition) {
-                    0 -> { // Left
-                        // do nothing, clock is on the left by default
-                    }
+                    0 -> { /* Left — default, do nothing */ }
 
                     1 -> { // Center
                         val container =
@@ -381,148 +331,63 @@ class StatusbarMisc(context: Context) : ModPack(context) {
                                         0,
                                         mContext.resources.getDimensionPixelSize(
                                             mContext.resources.getIdentifier(
-                                                "status_bar_padding_top",
-                                                "dimen",
-                                                mContext.packageName
+                                                "status_bar_padding_top", "dimen", mContext.packageName
                                             )
                                         ),
-                                        0,
-                                        0
+                                        0, 0
                                     )
                                     reAddView(statusBarClock)
                                 }
                         reAddView(container)
                         statusBarClock?.setPaddingRelative(0, 0, 0, 0)
-                        (statusBarClock?.layoutParams as? ViewGroup.MarginLayoutParams)
-                            ?.setMargins(0, 0, 0, 0)
-                        (statusBarClock?.layoutParams as? LinearLayout.LayoutParams)?.gravity =
-                            Gravity.CENTER
+                        (statusBarClock?.layoutParams as? ViewGroup.MarginLayoutParams)?.setMargins(0, 0, 0, 0)
+                        (statusBarClock?.layoutParams as? LinearLayout.LayoutParams)?.gravity = Gravity.CENTER
                     }
 
                     2 -> { // Right
                         statusBarContents?.reAddView(statusBarClock)
                         statusBarClock?.setPaddingRelative(0, 0, 0, 0)
-                        (statusBarClock?.layoutParams as? ViewGroup.MarginLayoutParams)
-                            ?.setMargins(endPadding, 0, startPadding, 0)
-                        (statusBarClock?.layoutParams as? LinearLayout.LayoutParams)?.gravity =
-                            Gravity.CENTER_VERTICAL or Gravity.END
+                        (statusBarClock?.layoutParams as? ViewGroup.MarginLayoutParams)?.setMargins(endPadding, 0, startPadding, 0)
+                        (statusBarClock?.layoutParams as? LinearLayout.LayoutParams)?.gravity = Gravity.CENTER_VERTICAL or Gravity.END
                     }
                 }
             }
         }
 
-       
-            phoneStatusBarViewClass
-    .hookMethod("onFinishInflate")
-    .runAfter { param ->
-        phoneStatusBarViewParam = param.thisObject as ViewGroup
+        phoneStatusBarViewClass
+            .hookMethod("onFinishInflate")
+            .runAfter { param ->
+                phoneStatusBarViewParam = param.thisObject as ViewGroup
+                phoneStatusBarViewParam.moveStatusBarClock()
+                phoneStatusBarViewParam.background = ColorDrawable(Color.parseColor("#33000000"))
 
-        phoneStatusBarViewParam.moveStatusBarClock()
-        phoneStatusBarViewParam.background = ColorDrawable(Color.parseColor("#33000000"))
-        val res = phoneStatusBarViewParam.resources
+                val res = phoneStatusBarViewParam.resources
 
-        val startSideId = res.getIdentifier(
-            "status_bar_start_side_except_heads_up",
-            "id",
-            "com.android.systemui"
-        )
-        val startSideView = phoneStatusBarViewParam.findViewById<ViewGroup>(startSideId)
-
-        startSideView?.layoutParams?.let { lp ->
-            val widthInPx = TypedValue.applyDimension(
-                TypedValue.COMPLEX_UNIT_DIP,
-                1400f,
-                res.displayMetrics
-            ).toInt()
-            lp.width = widthInPx
-            startSideView.layoutParams = lp
-        }
-
-        // Find the notification_icon_area view
-        val iconAreaId = res.getIdentifier("notification_icon_area", "id", "com.android.systemui")
-        val iconArea = phoneStatusBarViewParam.findViewById<ViewGroup>(iconAreaId)
-
-        // Convert 250dp to pixels
-        val iconAreaWidthInPx = TypedValue.applyDimension(
-            TypedValue.COMPLEX_UNIT_DIP,
-            250f,
-            res.displayMetrics
-        ).toInt()
-
-        // Update layout width
-        iconArea?.layoutParams?.let { lp ->
-            lp.width = iconAreaWidthInPx
-            iconArea.layoutParams = lp
-        }
-
-        // *** CombinedQSHeader block ***
-        val root = param.thisObject as ViewGroup
-        val res2 = root.resources   // renamed to avoid conflict
-
-        // get existing views
-        val clockId = res2.getIdentifier("clock", "id", "com.android.systemui")
-        val dateId = res2.getIdentifier("date", "id", "com.android.systemui")
-        val systemIconsId = res2.getIdentifier("system_icons", "id", "com.android.systemui")
-        val batteryId = res2.getIdentifier("battery", "id", "com.android.systemui")
-
-        val clockView = root.findViewById<View>(clockId)
-        val dateView = root.findViewById<View>(dateId)
-        val systemIcons = root.findViewById<View>(systemIconsId)
-        val battery = root.findViewById<View>(batteryId)
-
-        if (clockView != null && dateView != null && systemIcons != null && battery != null) {
-            // remove them from parent before re-adding
-            (clockView.parent as? ViewGroup)?.removeView(clockView)
-            (dateView.parent as? ViewGroup)?.removeView(dateView)
-            (systemIcons.parent as? ViewGroup)?.removeView(systemIcons)
-            (battery.parent as? ViewGroup)?.removeView(battery)
-
-            // parent LinearLayout with background
-            val container = LinearLayout(root.context).apply {
-                orientation = LinearLayout.HORIZONTAL
-                layoutParams = LinearLayout.LayoutParams(
-                    LinearLayout.LayoutParams.WRAP_CONTENT,
-                    LinearLayout.LayoutParams.MATCH_PARENT
+                val startSideId = res.getIdentifier(
+                    "status_bar_start_side_except_heads_up", "id", "com.android.systemui"
                 )
-                setBackgroundColor(Color.parseColor("#ff000000"))
-                setPadding(16, 0, 16, 0)
+                val startSideView = phoneStatusBarViewParam.findViewById<ViewGroup>(startSideId)
+                startSideView?.layoutParams?.let { lp ->
+                    lp.width = TypedValue.applyDimension(
+                        TypedValue.COMPLEX_UNIT_DIP, 1400f, res.displayMetrics
+                    ).toInt()
+                    startSideView.layoutParams = lp
+                }
+
+                val iconAreaId = res.getIdentifier("notification_icon_area", "id", "com.android.systemui")
+                val iconArea = phoneStatusBarViewParam.findViewById<ViewGroup>(iconAreaId)
+                iconArea?.layoutParams?.let { lp ->
+                    lp.width = TypedValue.applyDimension(
+                        TypedValue.COMPLEX_UNIT_DIP, 250f, res.displayMetrics
+                    ).toInt()
+                    iconArea.layoutParams = lp
+                }
             }
-
-            val leftText = TextView(root.context).apply {
-                text = "   "
-                textSize = 16f
-                gravity = Gravity.CENTER
-                layoutParams = LinearLayout.LayoutParams(
-                    LinearLayout.LayoutParams.WRAP_CONTENT,
-                    LinearLayout.LayoutParams.MATCH_PARENT
-                )
-            }
-
-            val leafText = TextView(root.context).apply {
-                text = "🍁   "
-                textSize = 16f
-                gravity = Gravity.CENTER
-                layoutParams = LinearLayout.LayoutParams(
-                    LinearLayout.LayoutParams.WRAP_CONTENT,
-                    LinearLayout.LayoutParams.MATCH_PARENT
-                )
-            }
-
-            container.addView(clockView)
-            container.addView(dateView)
-            container.addView(leftText)
-            container.addView(systemIcons)
-            container.addView(battery)
-            container.addView(leafText)
-
-            root.addView(container)
-        }
     }
-    } 
 
     private fun show4GInsteadOfLTE() {
         val mobileMappingsConfigClass =
-            findClass($$"com.android.settingslib.mobile.MobileMappings$Config")
+            findClass("com.android.settingslib.mobile.MobileMappings\$Config")
 
         mobileMappingsConfigClass
             .hookMethod("readConfig")
@@ -542,30 +407,28 @@ class StatusbarMisc(context: Context) : ModPack(context) {
     }
 
     private fun clickableClockView() {
-        val phoneStatusBarViewControllerClass = findClass(
-            "com.android.systemui.statusbar.phone.PhoneStatusBarViewController",
-            suppressError = true
+        val collapsedStatusBarFragment = findClass(
+            "$SYSTEMUI_PACKAGE.statusbar.phone.CollapsedStatusBarFragment",
+            "$SYSTEMUI_PACKAGE.statusbar.phone.fragment.CollapsedStatusBarFragment"
         )
 
-        phoneStatusBarViewControllerClass
-            .hookMethod("onViewAttached")
+        collapsedStatusBarFragment
+            .hookMethod("onViewCreated")
+            .parameters(
+                View::class.java,
+                Bundle::class.java
+            )
             .runAfter { param ->
-                mClockView = param.thisObject.getField("clock") as TextView
-                mCenterClockView = null
-                mRightClockView = null
+                mClockView = getLeftClockView(mContext, param) as? TextView
+                mCenterClockView = getCenterClockView(mContext, param) as? TextView
+                mRightClockView = getRightClockView(mContext, param) as? TextView
 
-                listOf(
-                    mClockView,
-                    mCenterClockView,
-                    mRightClockView
-                ).forEach { clockView ->
+                listOf(mClockView, mCenterClockView, mRightClockView).forEach { clockView ->
                     if (mClockClickable && clockView != null) {
-                        // Add click animation for Clock Chip
                         setClockChipClickable(mContext, clockView, BackgroundChip.cornerRadii)
 
                         clockView.setOnClickListener {
                             try {
-                                // First try to open the clock app via ACTION_SHOW_ALARMS
                                 mContext.startActivity(
                                     Intent(AlarmClock.ACTION_SHOW_ALARMS).apply {
                                         addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
@@ -573,7 +436,6 @@ class StatusbarMisc(context: Context) : ModPack(context) {
                                 )
                             } catch (_: Throwable) {
                                 try {
-                                    // Fallback: Open the Google Clock app directly
                                     mContext.startActivity(
                                         Intent(Intent.ACTION_MAIN).apply {
                                             addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
@@ -585,7 +447,6 @@ class StatusbarMisc(context: Context) : ModPack(context) {
                                     )
                                 } catch (_: Throwable) {
                                     try {
-                                        // Second fallback: Try AOSP Clock app
                                         mContext.startActivity(
                                             Intent(Intent.ACTION_MAIN).apply {
                                                 addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
@@ -596,10 +457,7 @@ class StatusbarMisc(context: Context) : ModPack(context) {
                                             }
                                         )
                                     } catch (throwable: Throwable) {
-                                        log(
-                                            this@StatusbarMisc,
-                                            "Could not open any clock app: $throwable"
-                                        )
+                                        log(this@StatusbarMisc, "Could not open any clock app: $throwable")
                                     }
                                 }
                             }
@@ -622,32 +480,25 @@ class StatusbarMisc(context: Context) : ModPack(context) {
                 clockView.isClickable = true
                 clockView.isFocusable = true
 
-                // Add a ripple effect
                 val rippleColor = ColorStateList.valueOf(
-                    ColorUtils.setAlphaComponent(
-                        Color.WHITE,
-                        102 // 0.4f
-                    )
+                    ColorUtils.setAlphaComponent(Color.WHITE, 102)
                 )
 
                 val pixelCornerRadii = cornerRadius.map {
                     mContext.toPx(it.toInt()).toFloat()
                 }.toFloatArray()
+
                 val mask = GradientDrawable().apply {
                     shape = GradientDrawable.RECTANGLE
                     cornerRadii = pixelCornerRadii
                     setColor(Color.WHITE)
                 }
-                val rippleDrawable = RippleDrawable(
-                    rippleColor,
-                    clockView.background, mask
-                )
+
+                val rippleDrawable = RippleDrawable(rippleColor, clockView.background, mask)
                 clockView.background = rippleDrawable
 
-                // Add a StateListAnimator for scaling animation
                 val stateListAnimator = StateListAnimator()
 
-                // Animation for pressed state: Scale to 90%
                 val pressedAnim = ObjectAnimator.ofPropertyValuesHolder(
                     clockView,
                     PropertyValuesHolder.ofFloat("scaleX", 0.9f),
@@ -657,7 +508,6 @@ class StatusbarMisc(context: Context) : ModPack(context) {
                     interpolator = AccelerateDecelerateInterpolator()
                 }
 
-                // Animation for normal state: Scale back to 100%
                 val defaultAnim = ObjectAnimator.ofPropertyValuesHolder(
                     clockView,
                     PropertyValuesHolder.ofFloat("scaleX", 1.0f),
@@ -667,15 +517,8 @@ class StatusbarMisc(context: Context) : ModPack(context) {
                     interpolator = AccelerateDecelerateInterpolator()
                 }
 
-                // Add the animations to the StateListAnimator
-                stateListAnimator.addState(
-                    intArrayOf(R.attr.state_pressed),
-                    pressedAnim
-                )
-                stateListAnimator.addState(
-                    intArrayOf(R.attr.state_focused),
-                    pressedAnim
-                )
+                stateListAnimator.addState(intArrayOf(R.attr.state_pressed), pressedAnim)
+                stateListAnimator.addState(intArrayOf(R.attr.state_focused), pressedAnim)
                 stateListAnimator.addState(intArrayOf(), defaultAnim)
 
                 clockView.stateListAnimator = stateListAnimator
